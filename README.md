@@ -1,393 +1,698 @@
-# Shark-Hub
--- SHARK HUB v2 | Loadstring Ready
--- Cole este código em um Pastebin/GitHub RAW e use:
--- loadstring(game:HttpGet("SEU_LINK_RAW"))()
+
+--[[
+    SHARK HUB | Roube um Ovo
+    Interface mobile + scanner de dados acessíveis
+    LocalScript para Roblox Studio
+
+    Inclui:
+    - UI azul neon e preta
+    - Painel arrastável por toque
+    - Minimizar, fechar e restaurar
+    - Seleção de biomas
+    - Busca por nome
+    - Scanner do maior valor de renda disponível
+    - Exibição de nome, raridade, renda, origem e imagem
+    - Cancelamento de buscas
+    - Botão de retorno à esteira com status informativo
+
+    Observação:
+    O scanner só encontra dados expostos ao cliente.
+    Teleporte e coleta exigem integração autorizada.
+]]
 
 local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
-local Lighting = game:GetService("Lighting")
-local RunService = game:GetService("RunService")
 
-local LP = Players.LocalPlayer
-local PG = LP:WaitForChild("PlayerGui")
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
 
--- Limpeza
-for _, name in ipairs({"SharkHubMain", "SharkHubNotifs"}) do
-    local old = PG:FindFirstChild(name)
-    if old then old:Destroy() end
+-- Evita interfaces duplicadas
+local oldGui = playerGui:FindFirstChild("SharkHub")
+if oldGui then
+    oldGui:Destroy()
 end
 
-local Cor = {
-    Fundo = Color3.fromRGB(5, 10, 18),
-    Painel = Color3.fromRGB(12, 20, 32),
-    Painel2 = Color3.fromRGB(18, 28, 45),
-    Neon = Color3.fromRGB(0, 200, 255),
-    NeonEscuro = Color3.fromRGB(0, 100, 160),
-    Texto = Color3.fromRGB(230, 240, 255),
-    TextoFraco = Color3.fromRGB(120, 150, 180),
-    Perigo = Color3.fromRGB(255, 70, 90),
-    Sucesso = Color3.fromRGB(0, 220, 130),
+-- Cores
+local BLUE = Color3.fromRGB(0, 145, 255)
+local CYAN = Color3.fromRGB(0, 220, 255)
+local DARK = Color3.fromRGB(6, 10, 20)
+local PANEL = Color3.fromRGB(15, 25, 43)
+local FIELD = Color3.fromRGB(21, 36, 58)
+local WHITE = Color3.fromRGB(240, 247, 255)
+local MUTED = Color3.fromRGB(145, 170, 200)
+local RED = Color3.fromRGB(175, 48, 60)
+local GREEN = Color3.fromRGB(25, 130, 100)
+
+local BIOMES = {
+    "Todos os biomas",
+    "Cosmic",
+    "Flor de Cerejeira",
+    "Titan Temple",
+    "Anjos e Demônios"
 }
 
--- ============ GUI ============
+local selectedBiome = BIOMES[1]
+local searching = false
+local scanToken = 0
+local minimized = false
+
+-- Interface principal
 local gui = Instance.new("ScreenGui")
-gui.Name = "SharkHubMain"
+gui.Name = "SharkHub"
 gui.ResetOnSpawn = false
-gui.IgnoreGuiInset = true
 gui.DisplayOrder = 100
-gui.Parent = PG
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.Parent = playerGui
 
--- ============ FUNDO COM RAIOS ============
-local fundoRaios = Instance.new("Frame")
-fundoRaios.Size = UDim2.new(1, 0, 1, 0)
-fundoRaios.BackgroundColor3 = Color3.fromRGB(2, 5, 10)
-fundoRaios.BackgroundTransparency = 0.3
-fundoRaios.BorderSizePixel = 0
-fundoRaios.ZIndex = 0
-fundoRaios.Parent = gui
-
--- Linhas de raios animadas (efeito visual)
-local raios = {}
-for i = 1, 6 do
-    local linha = Instance.new("Frame")
-    linha.Size = UDim2.new(0, math.random(40, 120), 0, 2)
-    linha.Position = UDim2.new(math.random(), 0, math.random(), 0)
-    linha.BackgroundColor3 = Cor.Neon
-    linha.BackgroundTransparency = 0.4
-    linha.BorderSizePixel = 0
-    linha.Rotation = math.random(-30, 30)
-    linha.ZIndex = 0
-    linha.Parent = fundoRaios
-    table.insert(raios, linha)
+local function round(object, radius)
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, radius)
+    corner.Parent = object
+    return corner
 end
 
--- Animação dos raios
-task.spawn(function()
-    while fundoRaios.Parent do
-        for _, linha in ipairs(raios) do
-            if linha.Parent then
-                TweenService:Create(linha, TweenInfo.new(0.3, Enum.EasingStyle.Linear), {
-                    BackgroundTransparency = math.random(60, 90) / 100,
-                    Position = UDim2.new(math.random(), 0, math.random(), 0),
-                    Rotation = math.random(-40, 40)
-                }):Play()
+local function stroke(object, color, thickness)
+    local border = Instance.new("UIStroke")
+    border.Color = color or BLUE
+    border.Thickness = thickness or 1
+    border.Parent = object
+    return border
+end
+
+local function makeLabel(parent, text, size, position, dimensions, color)
+    local item = Instance.new("TextLabel")
+    item.BackgroundTransparency = 1
+    item.Text = text
+    item.TextColor3 = color or WHITE
+    item.Font = Enum.Font.GothamMedium
+    item.TextSize = size
+    item.TextWrapped = true
+    item.TextXAlignment = Enum.TextXAlignment.Left
+    item.TextYAlignment = Enum.TextYAlignment.Center
+    item.Position = position
+    item.Size = dimensions
+    item.Parent = parent
+    return item
+end
+
+local function makeButton(parent, text, color, position, dimensions)
+    local item = Instance.new("TextButton")
+    item.Text = text
+    item.TextColor3 = WHITE
+    item.Font = Enum.Font.GothamBold
+    item.TextSize = 11
+    item.BackgroundColor3 = color
+    item.Position = position
+    item.Size = dimensions
+    item.AutoButtonColor = true
+    item.Active = true
+    item.Parent = parent
+
+    round(item, 8)
+    return item
+end
+
+local function makeTextBox(parent, placeholder, position, dimensions)
+    local item = Instance.new("TextBox")
+    item.PlaceholderText = placeholder
+    item.PlaceholderColor3 = MUTED
+    item.Text = ""
+    item.TextColor3 = WHITE
+    item.Font = Enum.Font.Gotham
+    item.TextSize = 11
+    item.ClearTextOnFocus = false
+    item.BackgroundColor3 = FIELD
+    item.Position = position
+    item.Size = dimensions
+    item.TextXAlignment = Enum.TextXAlignment.Left
+    item.Parent = parent
+
+    round(item, 8)
+    stroke(item, Color3.fromRGB(35, 75, 110), 1)
+
+    return item
+end
+
+-- Botão flutuante
+local toggle = makeButton(
+    gui, "SHARK HUB", BLUE,
+    UDim2.new(0, 12, 0.42, 0),
+    UDim2.fromOffset(100, 40)
+)
+toggle.TextSize = 12
+stroke(toggle, CYAN, 1.5)
+
+-- Painel
+local panel = Instance.new("Frame")
+panel.Name = "MainPanel"
+panel.Size = UDim2.fromOffset(320, 445)
+panel.Position = UDim2.new(0.5, -160, 0.5, -222)
+panel.BackgroundColor3 = DARK
+panel.ClipsDescendants = true
+panel.Active = true
+panel.Parent = gui
+
+round(panel, 12)
+stroke(panel, BLUE, 1.5)
+
+-- Ajuste de escala para telas pequenas
+local uiScale = Instance.new("UIScale")
+uiScale.Parent = panel
+
+local function updateScale()
+    local camera = Workspace.CurrentCamera
+    if not camera then
+        return
+    end
+
+    local viewport = camera.ViewportSize
+    local scaleX = (viewport.X - 20) / 320
+    local scaleY = (viewport.Y - 30) / 445
+
+    uiScale.Scale = math.clamp(
+        math.min(scaleX, scaleY, 1),
+        0.65,
+        1
+    )
+end
+
+updateScale()
+
+-- Cabeçalho
+local header = Instance.new("Frame")
+header.Size = UDim2.new(1, 0, 0, 42)
+header.BackgroundColor3 = PANEL
+header.Active = true
+header.Parent = panel
+round(header, 10)
+
+local title = makeLabel(
+    header, "SHARK HUB", 15,
+    UDim2.new(0, 12, 0, 0),
+    UDim2.new(1, -100, 1, 0), CYAN
+)
+title.Font = Enum.Font.GothamBold
+
+local minimizeButton = makeButton(
+    header, "—", DARK,
+    UDim2.new(1, -62, 0, 8),
+    UDim2.fromOffset(24, 26)
+)
+
+local closeButton = makeButton(
+    header, "X", RED,
+    UDim2.new(1, -32, 0, 8),
+    UDim2.fromOffset(24, 26)
+)
+
+-- Conteúdo rolável
+local content = Instance.new("ScrollingFrame")
+content.Name = "Content"
+content.Position = UDim2.new(0, 0, 0, 44)
+content.Size = UDim2.new(1, 0, 1, -46)
+content.BackgroundTransparency = 1
+content.BorderSizePixel = 0
+content.ScrollBarThickness = 3
+content.ScrollBarImageColor3 = CYAN
+content.CanvasSize = UDim2.new(0, 0, 0, 470)
+content.Active = true
+content.Parent = panel
+
+-- Título do scanner
+makeLabel(
+    content, "SCANNER DE OVOS", 11,
+    UDim2.new(0, 12, 0, 3),
+    UDim2.new(1, -24, 0, 20), MUTED
+)
+
+-- Seleção de bioma
+local biomeButton = makeButton(
+    content, "BIOMA: Todos os biomas  v", BLUE,
+    UDim2.new(0, 10, 0, 27),
+    UDim2.new(1, -20, 0, 32)
+)
+biomeButton.TextSize = 10
+
+local biomeIndex = 1
+
+biomeButton.Activated:Connect(function()
+    biomeIndex += 1
+
+    if biomeIndex > #BIOMES then
+        biomeIndex = 1
+    end
+
+    selectedBiome = BIOMES[biomeIndex]
+    biomeButton.Text = "BIOMA: " .. selectedBiome .. "  v"
+end)
+
+-- Pesquisa por nome
+local searchBox = makeTextBox(
+    content, "Pesquisar ovo ou pet...",
+    UDim2.new(0, 10, 0, 66),
+    UDim2.new(1, -20, 0, 31)
+)
+searchBox.ClearTextOnFocus = false
+
+-- Cartão de resultado
+local card = Instance.new("Frame")
+card.Name = "ResultCard"
+card.Position = UDim2.new(0, 10, 0, 105)
+card.Size = UDim2.new(1, -20, 0, 126)
+card.BackgroundColor3 = PANEL
+card.Parent = content
+round(card, 10)
+stroke(card, Color3.fromRGB(28, 65, 100), 1)
+
+local imageFrame = Instance.new("Frame")
+imageFrame.Position = UDim2.new(0, 8, 0, 10)
+imageFrame.Size = UDim2.fromOffset(86, 104)
+imageFrame.BackgroundColor3 = FIELD
+imageFrame.Parent = card
+round(imageFrame, 8)
+
+local petImage = Instance.new("ImageLabel")
+petImage.Name = "PetImage"
+petImage.BackgroundTransparency = 1
+petImage.Size = UDim2.new(1, -6, 1, -6)
+petImage.Position = UDim2.new(0, 3, 0, 3)
+petImage.ScaleType = Enum.ScaleType.Fit
+petImage.Parent = imageFrame
+round(petImage, 6)
+
+local placeholder = makeLabel(
+    imageFrame, "SEM IMAGEM", 9,
+    UDim2.new(0, 2, 0, 0),
+    UDim2.new(1, -4, 1, 0), MUTED
+)
+placeholder.TextXAlignment = Enum.TextXAlignment.Center
+
+local petName = makeLabel(
+    card, "Aguardando busca...", 11,
+    UDim2.new(0, 102, 0, 7),
+    UDim2.new(1, -110, 0, 30), WHITE
+)
+
+local rarityLabel = makeLabel(
+    card, "Raridade: --", 10,
+    UDim2.new(0, 102, 0, 38),
+    UDim2.new(1, -110, 0, 20), CYAN
+)
+
+local incomeLabel = makeLabel(
+    card, "Renda/s: --", 10,
+    UDim2.new(0, 102, 0, 60),
+    UDim2.new(1, -110, 0, 20), WHITE
+)
+
+local originLabel = makeLabel(
+    card, "Origem: --", 9,
+    UDim2.new(0, 102, 0, 82),
+    UDim2.new(1, -110, 0, 28), MUTED
+)
+
+-- Status
+local status = makeLabel(
+    content, "Status: pronto",
+    10, UDim2.new(0, 12, 0, 235),
+    UDim2.new(1, -24, 0, 32), MUTED
+)
+
+-- Botões de busca e parada
+local scanButton = makeButton(
+    content, "BUSCAR MELHOR OVO", BLUE,
+    UDim2.new(0, 10, 0, 271),
+    UDim2.new(1, -20, 0, 34)
+)
+
+local stopButton = makeButton(
+    content, "PARAR BUSCA", Color3.fromRGB(45, 57, 77),
+    UDim2.new(0, 10, 0, 312),
+    UDim2.new(0.5, -15, 0, 32)
+)
+
+local backButton = makeButton(
+    content, "VOLTAR À ESTEIRA", Color3.fromRGB(20, 65, 100),
+    UDim2.new(0.5, 5, 0, 312),
+    UDim2.new(0.5, -15, 0, 32)
+)
+
+-- Informações adicionais
+local info = makeLabel(
+    content,
+    "Os resultados dependem dos dados acessíveis ao cliente.",
+    9,
+    UDim2.new(0, 12, 0, 353),
+    UDim2.new(1, -24, 0, 36),
+    MUTED
+)
+
+local footer = makeLabel(
+    content, "SHARK HUB  •  MOBILE",
+    9, UDim2.new(0, 12, 0, 401),
+    UDim2.new(1, -24, 0, 20), CYAN
+)
+
+-- Scanner: lê apenas dados acessíveis
+local function getNumber(object, attributeName, childName)
+    local attribute = object:GetAttribute(attributeName)
+
+    if attribute ~= nil then
+        local value = tonumber(attribute)
+        if value then
+            return value
+        end
+    end
+
+    local child = object:FindFirstChild(childName)
+
+    if child and (
+        child:IsA("NumberValue")
+        or child:IsA("IntValue")
+    ) then
+        return child.Value
+    end
+
+    return nil
+end
+
+local function getBiome(object)
+    local biome = object:GetAttribute("Biome")
+
+    if biome then
+        return tostring(biome)
+    end
+
+    local current = object
+
+    while current and current ~= Workspace do
+        local name = string.lower(current.Name)
+
+        if string.find(name, "cosmic") then
+            return "Cosmic"
+        elseif string.find(name, "cerejeira")
+            or string.find(name, "cherry") then
+            return "Flor de Cerejeira"
+        elseif string.find(name, "titan") then
+            return "Titan Temple"
+        elseif string.find(name, "demon")
+            or string.find(name, "angel")
+            or string.find(name, "anjo") then
+            return "Anjos e Demônios"
+        end
+
+        current = current.Parent
+    end
+
+    return nil
+end
+
+local function matchesBiome(object)
+    if selectedBiome == "Todos os biomas" then
+        return true
+    end
+
+    local actualBiome = getBiome(object)
+
+    if not actualBiome then
+        return false
+    end
+
+    return string.lower(actualBiome)
+        == string.lower(selectedBiome)
+end
+
+local function getImageId(object)
+    local image = object:GetAttribute("ImageId")
+        or object:GetAttribute("PetImage")
+
+    if image then
+        local value = tostring(image)
+
+        if string.match(value, "^%d+$") then
+            return "rbxassetid://" .. value
+        end
+
+        if string.match(value, "^rbxassetid://%d+$") then
+            return value
+        end
+    end
+
+    return nil
+end
+
+local function scanBest(token)
+    local best = nil
+    local count = 0
+    local processed = 0
+
+    local query = string.lower(searchBox.Text)
+
+    local descendants = Workspace:GetDescendants()
+
+    for _, object in ipairs(descendants) do
+        if token ~= scanToken then
+            return nil, count, true
+        end
+
+        processed += 1
+
+        if processed % 150 == 0 then
+            status.Text = "Status: analisando " .. processed .. " objetos..."
+            task.wait()
+        end
+
+        if object:IsA("Model") or object:IsA("BasePart") then
+            local lowerName = string.lower(object.Name)
+
+            local petAttribute = object:GetAttribute("PetName")
+            local looksLikeEgg =
+                string.find(lowerName, "egg")
+                or string.find(lowerName, "ovo")
+                or petAttribute ~= nil
+
+            local matchesSearch =
+                query == ""
+                or string.find(lowerName, query, 1, true)
+                or (
+                    petAttribute
+                    and string.find(
+                        string.lower(tostring(petAttribute)),
+                        query,
+                        1,
+                        true
+                    )
+                )
+
+            if looksLikeEgg
+                and matchesSearch
+                and matchesBiome(object) then
+
+                local money = getNumber(
+                    object,
+                    "MoneyPerSecond",
+                    "MoneyPerSecond"
+                )
+
+                if money then
+                    count += 1
+
+                    if not best or money > best.income then
+                        best = {
+                            object = object,
+                            name = tostring(
+                                petAttribute or object.Name
+                            ),
+                            rarity = tostring(
+                                object:GetAttribute("Rarity") or "--"
+                            ),
+                            egg = object:GetAttribute("EggName")
+                                or object.Name,
+                            biome = getBiome(object) or "--",
+                            income = money,
+                            image = getImageId(object)
+                        }
+                    end
+                end
             end
         end
-        task.wait(0.4)
     end
-end)
 
--- ============ PAINEL PRINCIPAL ============
-local painel = Instance.new("Frame")
-painel.Name = "Painel"
-painel.Size = UDim2.fromOffset(300, 320)
-painel.Position = UDim2.new(0.5, -150, 0.5, -160)
-painel.BackgroundColor3 = Cor.Fundo
-painel.BackgroundTransparency = 0.15
-painel.BorderSizePixel = 0
-painel.Active = true
-painel.ZIndex = 2
-painel.Parent = gui
-
-local pc = Instance.new("UICorner")
-pc.CornerRadius = UDim.new(0, 12)
-pc.Parent = painel
-
-local ps = Instance.new("UIStroke")
-ps.Color = Cor.Neon
-ps.Thickness = 2
-ps.Parent = painel
-
--- ============ TOPO ============
-local topo = Instance.new("Frame")
-topo.Size = UDim2.new(1, 0, 0, 40)
-topo.BackgroundColor3 = Cor.Painel
-topo.BorderSizePixel = 0
-topo.ZIndex = 3
-topo.Parent = painel
-
-local tc = Instance.new("UICorner")
-tc.CornerRadius = UDim.new(0, 12)
-tc.Parent = topo
-
--- Ícone do tubarão (emoji por enquanto, troque por ImageLabel se tiver asset)
-local icone = Instance.new("TextLabel")
-icone.Size = UDim2.fromOffset(32, 32)
-icone.Position = UDim2.new(0, 8, 0.5, -16)
-icone.BackgroundTransparency = 1
-icone.Text = "🦈"
-icone.TextSize = 22
-icone.ZIndex = 4
-icone.Parent = topo
-
-local titulo = Instance.new("TextLabel")
-titulo.Size = UDim2.new(0, 150, 1, 0)
-titulo.Position = UDim2.new(0, 44, 0, 0)
-titulo.BackgroundTransparency = 1
-titulo.Text = "SHARK HUB"
-titulo.TextColor3 = Cor.Neon
-titulo.TextSize = 15
-titulo.Font = Enum.Font.GothamBold
-titulo.TextXAlignment = Enum.TextXAlignment.Left
-titulo.ZIndex = 4
-titulo.Parent = topo
-
--- Botões
-local function criarCtrl(xPos, texto, cor, callback)
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.fromOffset(30, 30)
-    btn.Position = UDim2.new(1, xPos, 0.5, -15)
-    btn.BackgroundColor3 = Cor.Painel2
-    btn.Text = texto
-    btn.TextColor3 = cor
-    btn.TextSize = 14
-    btn.Font = Enum.Font.GothamBold
-    btn.AutoButtonColor = false
-    btn.ZIndex = 4
-    btn.Parent = topo
-    local c = Instance.new("UICorner")
-    c.CornerRadius = UDim.new(0, 6)
-    c.Parent = btn
-    btn.MouseButton1Click:Connect(callback)
-    return btn
+    return best, count, false
 end
 
-criarCtrl(-40, "–", Cor.TextoFraco, function()
-    painel.Visible = false
-    reabrir.Visible = true
-end)
-
-criarCtrl(-74, "✕", Cor.Perigo, function()
-    gui:Destroy()
-end)
-
--- ============ BOTÃO REABRIR (ARRASTÁVEL) ============
-local reabrir = Instance.new("TextButton")
-reabrir.Size = UDim2.fromOffset(48, 48)
-reabrir.Position = UDim2.new(0, 20, 0.5, -24)
-reabrir.BackgroundColor3 = Cor.Fundo
-reabrir.Text = "🦈"
-reabrir.TextSize = 24
-reabrir.Visible = false
-reabrir.AutoButtonColor = false
-reabrir.ZIndex = 5
-reabrir.Parent = gui
-
-local rc = Instance.new("UICorner")
-rc.CornerRadius = UDim.new(1, 0)
-rc.Parent = reabrir
-
-local rs = Instance.new("UIStroke")
-rs.Color = Cor.Neon
-rs.Thickness = 2
-rs.Parent = reabrir
-
--- Arrastar o botão reabrir
-local arrastandoBtn, inicioBtn, posBtn = false, nil, nil
-reabrir.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        arrastandoBtn = true
-        inicioBtn = input.Position
-        posBtn = reabrir.Position
-    end
-end)
-UserInputService.InputChanged:Connect(function(input)
-    if arrastandoBtn and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-        local delta = input.Position - inicioBtn
-        reabrir.Position = UDim2.new(posBtn.X.Scale, posBtn.X.Offset + delta.X, posBtn.Y.Scale, posBtn.Y.Offset + delta.Y)
-    end
-end)
-UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        arrastandoBtn = false
-    end
-end)
-
-reabrir.MouseButton1Click:Connect(function()
-    painel.Visible = true
-    reabrir.Visible = false
-end)
-
--- ============ CONTEÚDO ============
-local conteudo = Instance.new("Frame")
-conteudo.Size = UDim2.new(1, -16, 1, -56)
-conteudo.Position = UDim2.new(0, 8, 0, 46)
-conteudo.BackgroundTransparency = 1
-conteudo.ZIndex = 3
-conteudo.Parent = painel
-
-local scroll = Instance.new("ScrollingFrame")
-scroll.Size = UDim2.new(1, 0, 1, 0)
-scroll.BackgroundTransparency = 1
-scroll.BorderSizePixel = 0
-scroll.ScrollBarThickness = 3
-scroll.ScrollBarImageColor3 = Cor.Neon
-scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-scroll.ZIndex = 3
-scroll.Parent = conteudo
-
-local layout = Instance.new("UIListLayout")
-layout.Padding = UDim.new(0, 6)
-layout.SortOrder = Enum.SortOrder.LayoutOrder
-layout.Parent = scroll
-
-layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-    scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 6)
-end)
-
--- ============ COMPONENTES ============
-local function secao(texto)
-    local t = Instance.new("TextLabel")
-    t.Size = UDim2.new(1, 0, 0, 20)
-    t.BackgroundTransparency = 1
-    t.Text = "▸ " .. texto
-    t.TextColor3 = Cor.Neon
-    t.TextSize = 11
-    t.Font = Enum.Font.GothamBold
-    t.TextXAlignment = Enum.TextXAlignment.Left
-    t.ZIndex = 4
-    t.Parent = scroll
+local function showNoResult(message)
+    petName.Text = "Nenhum resultado"
+    rarityLabel.Text = "Raridade: --"
+    incomeLabel.Text = "Renda/s: --"
+    originLabel.Text = "Origem: --"
+    petImage.Image = ""
+    placeholder.Visible = true
+    status.Text = message
 end
 
-local function toggle(texto, padrao, callback)
-    local valor = padrao or false
-    local linha = Instance.new("TextButton")
-    linha.Size = UDim2.new(1, 0, 0, 40)
-    linha.BackgroundColor3 = Cor.Painel2
-    linha.BackgroundTransparency = 0.2
-    linha.Text = ""
-    linha.AutoButtonColor = false
-    linha.ZIndex = 4
-    linha.Parent = scroll
-
-    local lc = Instance.new("UICorner")
-    lc.CornerRadius = UDim.new(0, 8)
-    lc.Parent = linha
-
-    local nome = Instance.new("TextLabel")
-    nome.Size = UDim2.new(1, -55, 1, 0)
-    nome.Position = UDim2.new(0, 10, 0, 0)
-    nome.BackgroundTransparency = 1
-    nome.Text = texto
-    nome.TextColor3 = Cor.Texto
-    nome.TextSize = 12
-    nome.Font = Enum.Font.Gotham
-    nome.TextXAlignment = Enum.TextXAlignment.Left
-    nome.ZIndex = 5
-    nome.Parent = linha
-
-    local bolinha = Instance.new("Frame")
-    bolinha.Size = UDim2.fromOffset(34, 18)
-    bolinha.Position = UDim2.new(1, -44, 0.5, -9)
-    bolinha.BackgroundColor3 = Color3.fromRGB(30, 40, 55)
-    bolinha.ZIndex = 5
-    bolinha.Parent = linha
-
-    local bc = Instance.new("UICorner")
-    bc.CornerRadius = UDim.new(1, 0)
-    bc.Parent = bolinha
-
-    local knob = Instance.new("Frame")
-    knob.Size = UDim2.fromOffset(14, 14)
-    knob.Position = UDim2.new(0, 2, 0.5, -7)
-    knob.BackgroundColor3 = Cor.TextoFraco
-    knob.ZIndex = 6
-    knob.Parent = bolinha
-
-    local kc = Instance.new("UICorner")
-    kc.CornerRadius = UDim.new(1, 0)
-    kc.Parent = knob
-
-    local function aplicar(v)
-        valor = v
-        knob.Position = v and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
-        knob.BackgroundColor3 = v and Cor.Neon or Cor.TextoFraco
-        bolinha.BackgroundColor3 = v and Cor.NeonEscuro or Color3.fromRGB(30, 40, 55)
-        if callback then pcall(callback, v) end
+scanButton.Activated:Connect(function()
+    if searching then
+        status.Text = "Status: a busca já está em andamento"
+        return
     end
 
-    linha.MouseButton1Click:Connect(function() aplicar(not valor) end)
-    aplicar(valor)
-end
+    searching = true
+    scanToken += 1
 
-local function botao(texto, callback, cor)
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, 0, 0, 36)
-    btn.BackgroundColor3 = Cor.Painel2
-    btn.Text = texto
-    btn.TextColor3 = cor or Cor.Texto
-    btn.TextSize = 12
-    btn.Font = Enum.Font.GothamBold
-    btn.AutoButtonColor = false
-    btn.ZIndex = 4
-    btn.Parent = scroll
+    local myToken = scanToken
 
-    local bc = Instance.new("UICorner")
-    bc.CornerRadius = UDim.new(0, 8)
-    bc.Parent = btn
+    scanButton.Text = "BUSCANDO..."
+    status.Text = "Status: iniciando scanner..."
 
-    btn.MouseButton1Click:Connect(function()
-        if callback then pcall(callback) end
+    task.spawn(function()
+        local ok, best, count, cancelled = pcall(function()
+            local result, total, wasCancelled = scanBest(myToken)
+            return result, total, wasCancelled
+        end)
+
+        if myToken ~= scanToken then
+            return
+        end
+
+        searching = false
+        scanButton.Text = "BUSCAR MELHOR OVO"
+
+        if not ok then
+            showNoResult("Erro ao ler os dados acessíveis")
+            return
+        end
+
+        if cancelled then
+            status.Text = "Status: busca cancelada"
+            return
+        end
+
+        if not best then
+            showNoResult(
+                "Nenhum resultado com renda disponível para esse filtro"
+            )
+            return
+        end
+
+        petName.Text = best.name
+        rarityLabel.Text = "Raridade: " .. best.rarity
+        incomeLabel.Text = "Renda/s: " .. tostring(best.income)
+        originLabel.Text = "Origem: " .. tostring(best.egg)
+
+        if best.image then
+            petImage.Image = best.image
+            placeholder.Visible = false
+        else
+            petImage.Image = ""
+            placeholder.Visible = true
+        end
+
+        status.Text = "Status: melhor renda entre "
+            .. tostring(count) .. " resultados"
+
+        info.Text = "Bioma detectado: " .. best.biome
     end)
+end)
+
+-- Cancelar busca em andamento
+stopButton.Activated:Connect(function()
+    scanToken += 1
+    searching = false
+    scanButton.Text = "BUSCAR MELHOR OVO"
+    status.Text = "Status: busca cancelada"
+end)
+
+-- Não inventa teleporte ou interação do jogo
+backButton.Activated:Connect(function()
+    status.Text = "Use a interação oficial do jogo para voltar à esteira"
+end)
+
+-- Minimizar e restaurar
+minimizeButton.Activated:Connect(function()
+    minimized = not minimized
+
+    content.Visible = not minimized
+
+    panel.Size = minimized
+        and UDim2.fromOffset(320, 42)
+        or UDim2.fromOffset(320, 445)
+
+    minimizeButton.Text = minimized and "+" or "—"
+
+    updateScale()
+end)
+
+-- Fechar e reabrir
+closeButton.Activated:Connect(function()
+    panel.Visible = false
+    toggle.Visible = true
+end)
+
+toggle.Activated:Connect(function()
+    panel.Visible = true
+    toggle.Visible = false
+    updateScale()
+end)
+
+-- Arrastar por toque ou mouse
+local dragging = false
+local dragStart
+local startPosition
+
+header.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+
+        dragging = true
+        dragStart = input.Position
+        startPosition = panel.Position
+
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and (
+        input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch
+    ) then
+        local delta = input.Position - dragStart
+
+        panel.Position = UDim2.new(
+            startPosition.X.Scale,
+            startPosition.X.Offset + delta.X,
+            startPosition.Y.Scale,
+            startPosition.Y.Offset + delta.Y
+        )
+    end
+end)
+
+-- Atualizar escala se a tela mudar
+local function connectCamera()
+    local camera = Workspace.CurrentCamera
+
+    if camera then
+        camera:GetPropertyChangedSignal("ViewportSize"):Connect(
+            updateScale
+        )
+    end
 end
 
--- ============ FUNÇÕES (PLACEHOLDER) ============
-secao("FARM")
-toggle("Auto Coletar Ovos", false, function(v)
-    print("[SHARK] Auto Coletar:", v)
-end)
-toggle("Auto Roubar (Steal)", false, function(v)
-    print("[SHARK] Auto Steal:", v)
-end)
-toggle("Auto Chocar", false, function(v)
-    print("[SHARK] Auto Hatch:", v)
-end)
-toggle("Auto Vender", false, function(v)
-    print("[SHARK] Auto Sell:", v)
-end)
+connectCamera()
 
-secao("MOVIMENTO")
-toggle("Speed Hack", false, function(v)
-    local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
-    if hum then hum.WalkSpeed = v and 32 or 16 end
-end)
-toggle("Jump Hack", false, function(v)
-    local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
-    if hum then hum.UseJumpPower = true; hum.JumpPower = v and 100 or 50 end
-end)
+Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(
+    connectCamera
+)
 
-secao("VISUAL")
-toggle("Full Bright", false, function(v)
-    Lighting.Brightness = v and 3 or 2
-    if v then Lighting.ClockTime = 14 end
-end)
+toggle.Visible = false
+panel.Visible = true
 
-secao("MISC")
-botao("Resetar Personagem", function()
-    local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
-    if hum then hum.Health = 0 end
-end, Cor.Perigo)
+status.Text = "Status: pronto para buscar"
 
--- ============ ARRASTAR PAINEL ============
-local arrastando, inicio, posInicial = false, nil, nil
-topo.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        arrastando = true
-        inicio = input.Position
-        posInicial = painel.Position
-    end
-end)
-UserInputService.InputChanged:Connect(function(input)
-    if arrastando and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-        local delta = input.Position - inicio
-        painel.Position = UDim2.new(posInicial.X.Scale, posInicial.X.Offset + delta.X, posInicial.Y.Scale, posInicial.Y.Offset + delta.Y)
-    end
-end)
-UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        arrastando = false
-    end
-end)
-
-print("[SHARK HUB] Carregado.")
+print("[SHARK HUB] Interface carregada.")
